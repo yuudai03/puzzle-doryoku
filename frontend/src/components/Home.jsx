@@ -1,191 +1,165 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { authFetch } from '../api';
 
 export default function Home({ onNavigate, currentUser, onLogout }) {
-  const accentColor = '#38bdf8';
+  const [today, setToday] = useState({ minutes: 0, sessions: 0, target: 100, bombs: 0 });
+
+  // ホームでも今日の進み具合を見せる
+  useEffect(() => {
+    const fetchToday = async () => {
+      try {
+        const response = await authFetch('/api/pomodoro/today');
+        if (!response.ok) return;
+        const data = await response.json();
+        setToday({
+          minutes: data.today_minutes,
+          sessions: data.today_sessions,
+          target: data.target_minutes,
+          bombs: data.bomb_count ?? 0
+        });
+      } catch (error) {
+        console.error('今日の記録の取得エラー:', error);
+      }
+    };
+    fetchToday();
+  }, []);
+
+  const todayPercent = Math.min(100, (today.minutes / today.target) * 100);
+
+  const menuItems = [
+    { key: 'game', title: 'パズルで遊ぶ', desc: `ボム ${today.bombs}個 所持中`, color: 'var(--bomb)', soft: 'var(--bomb-soft)' },
+    { key: 'missions', title: 'デイリーミッション', desc: '目標達成でボムを獲得', color: 'var(--gold)', soft: 'var(--gold-soft)' },
+    { key: 'ranking', title: 'ランキング', desc: 'パズルのハイスコア', color: 'var(--long)', soft: 'var(--long-soft)' },
+  ];
 
   return (
-    <div className="container theme-home" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      position: 'relative',
-      textAlign: 'center',
-      overflow: 'hidden'
-    }}>
-      
-      {/* --- 左上のメニュー --- */}
-      <div className="left-menu-container">
-        <button className="btn-side" onClick={() => onNavigate('profile')}>
-          <span style={{ fontSize: '0.8em', marginRight: '5px' }}>ID:</span>
-          {currentUser?.id || "GUEST"}
-        </button>
-        <button className="btn-side" onClick={() => onNavigate('friends')}>
-          [ FRIEND ]
-        </button>
-      </div>
-      
-      {/* --- 右上のシステム操作エリア --- */}
-      <div style={{
-        position: 'absolute',
-        top: '20px',
-        right: '20px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-end',
-        gap: '12px'
-      }}>
-        <div style={{ color: accentColor, fontSize: '12px', fontFamily: 'monospace', opacity: 0.7 }}>
-          STATUS: ONLINE // USER: {currentUser?.id}
-        </div>
-        
-        {/* ★ 修正：HOW TO PLAY のクラスを btn-side に変更し、縦のズレを防ぐため alignItems: 'center' を追加しました */}
-        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <button onClick={() => onNavigate('guide')} className="btn-side">
-            [ HOW TO PLAY ]
+    <div className="page">
+      {/* ---- ヘッダー ---- */}
+      <header className="home-header">
+        <div className="home-logo">PUZZLE &amp; DORYOKU</div>
+        <nav className="home-nav">
+          <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('profile')}>
+            {currentUser?.id} さん
           </button>
-          
-          <button onClick={onLogout} className="btn-logout">
-            [ LOGOUT ]
-          </button>
-        </div>
-      </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('friends')}>フレンド</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('guide')}>遊び方</button>
+          <button className="btn btn-ghost btn-sm" onClick={onLogout}>ログアウト</button>
+        </nav>
+      </header>
 
-      {/* --- メインコンテンツ --- */}
-      <div className="home-content">
-        <h1 className="app-title" style={{ 
-          fontSize: '6rem', 
-          lineHeight: '1.1',
-          marginBottom: '10px' 
-        }}>
-          PUZZLE<br />& <br />DRYOKU's
-        </h1>
-        
-        <p style={{ 
-          color: accentColor, 
-          marginTop: '20px', 
-          marginBottom: '60px', 
-          fontSize: '1.2rem',
-          letterSpacing: '0.5em',
-          fontWeight: 'bold',
-          fontFamily: 'monospace',
-          textShadow: `0 0 10px ${accentColor}aa`
-        }}>
-          {">> 集中モードを起動してください"}
-        </p>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '25px', alignItems: 'center' }}>
-          <button className="btn-cyber-main" onClick={() => onNavigate('timer')}>
-            [ 01. START TIMER ]
-          </button>
-          
-          <div style={{ display: 'flex', gap: '20px' }}>
-            <button className="btn-cyber-sub" onClick={() => onNavigate('game')}>
-              [ 02. PLAY PUZZLE ]
-            </button>
-            <button className="btn-cyber-sub" onClick={() => onNavigate('ranking')}>
-              [ 03. RANKING ]
-            </button>
-            <button className="btn-cyber-sub" onClick={() => onNavigate('missions')}>
-              [ 04. MISSIONS ]
-            </button>
+      {/* ---- メイン：タイマー ---- */}
+      <section className="card home-hero">
+        <div>
+          <p className="text-2 small" style={{ margin: 0 }}>今日の集中</p>
+          <p className="home-today num">
+            {today.minutes}
+            <span className="stat-unit"> / {today.target}分</span>
+            <span className="text-3 small" style={{ marginLeft: '12px' }}>{today.sessions}セット</span>
+          </p>
+          <div className="progress" style={{ maxWidth: '360px' }}>
+            <span style={{ width: `${todayPercent}%` }} />
           </div>
         </div>
-      </div>
+        <button className="btn btn-primary btn-lg" onClick={() => onNavigate('timer')}>
+          集中をはじめる
+        </button>
+      </section>
 
-      {/* --- CSS設定 --- */}
+      {/* ---- その他のメニュー ---- */}
+      <section className="home-menu">
+        {menuItems.map((item) => (
+          <button key={item.key} className="home-tile" onClick={() => onNavigate(item.key)}>
+            <span className="home-tile-dot" style={{ background: item.soft }}>
+              <span style={{ background: item.color }} />
+            </span>
+            <span className="home-tile-title">{item.title}</span>
+            <span className="home-tile-desc">{item.desc}</span>
+          </button>
+        ))}
+      </section>
+
       <style>{`
-        .left-menu-container {
-          position: absolute;
-          top: 30px;
-          left: 40px;
+        .home-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 40px;
+        }
+        .home-logo {
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          font-size: 1.05rem;
+        }
+        .home-nav {
+          display: flex;
+          gap: 4px;
+          flex-wrap: wrap;
+        }
+        .home-hero {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 24px;
+          flex-wrap: wrap;
+          padding: 28px;
+        }
+        .home-hero > div {
+          flex: 1;
+          min-width: 220px;
+        }
+        .home-today {
+          font-size: 2.4rem;
+          font-weight: 700;
+          margin: 2px 0 10px;
+          line-height: 1.2;
+        }
+        .home-menu {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 14px;
+          margin-top: 16px;
+        }
+        .home-tile {
           display: flex;
           flex-direction: column;
-          gap: 15px;
-        }
-
-        .btn-side {
-          background: rgba(15, 23, 42, 0.5);
-          color: ${accentColor};
-          border: 1px solid rgba(56, 189, 248, 0.3);
-          border-radius: 4px;
-          font-family: 'Courier New', monospace;
-          font-size: 16px;
-          font-weight: bold;
+          align-items: flex-start;
+          gap: 4px;
+          text-align: left;
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          padding: 20px;
           cursor: pointer;
-          transition: all 0.3s ease;
-          padding: 10px 20px;
-          letter-spacing: 0.1em;
-          backdrop-filter: blur(5px);
-          min-width: 140px;
-          text-align: center;
+          transition: border-color 0.15s, transform 0.15s;
+          color: var(--text);
         }
-        .btn-side:hover {
-          background: rgba(56, 189, 248, 0.1);
-          color: white;
-          box-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
-          border-color: ${accentColor};
-          transform: translateX(5px);
+        .home-tile:hover {
+          border-color: var(--border-strong);
+          transform: translateY(-2px);
         }
-
-        .btn-logout {
-          background: transparent;
-          color: rgba(255, 255, 255, 0.4);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          font-family: 'Courier New', monospace;
-          font-size: 12px;
-          padding: 5px 10px;
-          cursor: pointer;
-          transition: all 0.3s;
+        .home-tile-dot {
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 8px;
         }
-        .btn-logout:hover {
-          color: #ff4757;
-          border-color: #ff4757;
-          background: rgba(255, 71, 87, 0.1);
+        .home-tile-dot > span {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
         }
-
-        .btn-cyber-main {
-          width: 480px;
-          padding: 25px;
-          background: transparent;
-          color: ${accentColor};
-          border: 2px solid ${accentColor};
-          font-family: 'Courier New', monospace;
-          font-size: 24px;
-          font-weight: 900;
-          cursor: pointer;
-          transition: all 0.3s;
-          letter-spacing: 0.15em;
-          box-shadow: 0 0 20px ${accentColor}44;
-          white-space: nowrap;
+        .home-tile-title {
+          font-weight: 700;
+          font-size: 1rem;
         }
-        .btn-cyber-main:hover {
-          background: ${accentColor};
-          color: #020617;
-          box-shadow: 0 0 40px ${accentColor};
-          transform: scale(1.02);
-        }
-
-        .btn-cyber-sub {
-          width: 230px;
-          padding: 18px;
-          background: rgba(30, 41, 59, 0.5);
-          color: white;
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          font-family: 'Courier New', monospace;
-          font-size: 14px;
-          font-weight: bold;
-          cursor: pointer;
-          transition: all 0.3s;
-          white-space: nowrap;
-          letter-spacing: 0.05em;
-        }
-        .btn-cyber-sub:hover {
-          border-color: ${accentColor};
-          color: ${accentColor};
-          background: rgba(56, 189, 248, 0.1);
-          transform: scale(1.05);
+        .home-tile-desc {
+          font-size: 0.85rem;
+          color: var(--text-2);
         }
       `}</style>
     </div>

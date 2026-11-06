@@ -1,177 +1,138 @@
 import React, { useState } from 'react';
+import { API_BASE } from '../api';
 
 export default function Login({ onLogin }) {
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [isLoginMode, setIsLoginMode] = useState(true);
-
-  // APIのベースURL（Flaskのデフォルト）
-  const API_BASE = "http://127.0.0.1:5000";
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+    setError('');
+
     // 入力チェック
     if (!userId.trim() || !password.trim()) {
-      alert('ユーザーIDとパスワードを入力してください！');
+      setError('ユーザーIDとパスワードを入力してください');
       return;
     }
 
     // 叩くエンドポイントを切り替え
     const endpoint = isLoginMode ? '/api/auth/login' : '/api/auth/register';
 
+    setIsSubmitting(true);
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, password: password })
+        body: JSON.stringify({ user_id: userId.trim(), password: password })
       });
 
       const data = await response.json();
 
-      if (response.ok) {
-        // 成功！
-        alert(data.message);
-        // ログインモードだった、あるいは登録に成功した場合は、そのままログイン状態にする
-        // （※登録成功後に自動ログインさせるか、ログイン画面に戻すかは設計次第ですが、
-        // ユーザー体験のためにここではログイン成功として扱います）
-        onLogin(userId);
+      if (response.ok && data.token) {
+        // 成功！ サーバーが発行したトークンを受け取ってログイン状態にする
+        // （新規登録のときもトークンが返ってくるので、そのままログインできる）
+        onLogin(data.user_id, data.token);
       } else {
         // 失敗（ID重複やパスワード間違いなど）
-        alert(`エラー: ${data.message}`);
+        setError(data.message || 'うまくいきませんでした。もう一度お試しください');
       }
-    } catch (error) {
-      console.error('通信エラー:', error);
-      alert('サーバーとの通信に失敗しました。app.pyが起動しているか確認してください。');
+    } catch (err) {
+      console.error('通信エラー:', err);
+      setError('サーバーに接続できませんでした。バックエンド（app.py）が起動しているか確認してください');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const accentColor = '#38bdf8';
+  const switchMode = () => {
+    setIsLoginMode(!isLoginMode);
+    setError('');
+  };
 
   return (
-    <div className="container theme-home" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      padding: '20px',
-      textAlign: 'center'
-    }}>
-      <h1 className="app-title">
-        DRYOKU<br />& PUZZLE
-      </h1>
-      
-      <p style={{ 
-        color: accentColor, 
-        marginBottom: '40px', 
-        fontSize: '18px',
-        letterSpacing: '0.3em',
-        fontWeight: 'bold'
-      }}>
-        {isLoginMode ? '>> ログイン' : '>> 新規登録'}
-      </p>
+    <div className="login-wrap">
+      <div className="login-brand">
+        <h1 className="login-title">PUZZLE &amp; DORYOKU</h1>
+        <p className="login-catch">勉強して、ボムを集めて、パズルで遊ぶ。</p>
+      </div>
 
-      <div style={{
-        width: '100%',
-        maxWidth: '450px',
-        backgroundColor: 'rgba(30, 41, 59, 0.4)',
-        backdropFilter: 'blur(8px)',
-        padding: '50px 40px',
-        borderRadius: '4px',
-        border: `1px solid ${accentColor}44`,
-        boxShadow: `0 20px 50px rgba(0, 0, 0, 0.5)`,
-      }}>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
-          <div style={{ textAlign: 'left' }}>
-            <label style={{ color: accentColor, fontSize: '14px', fontFamily: 'monospace', marginBottom: '8px', display: 'block' }}>
-              _USER_ID:
-            </label>
-            <input 
-              type="text" 
+      <div className="card login-card">
+        <h2 className="section-title" style={{ fontSize: '1.15rem', marginBottom: '20px' }}>
+          {isLoginMode ? 'ログイン' : '新しくアカウントを作る'}
+        </h2>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label className="field-label" htmlFor="login-id">ユーザーID</label>
+            <input
+              id="login-id"
+              type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
-              placeholder="ENTER ID"
-              className="login-input"
+              placeholder="例：yudai"
+              className="input"
+              autoComplete="username"
+              maxLength={20}
             />
           </div>
 
-          <div style={{ textAlign: 'left' }}>
-            <label style={{ color: accentColor, fontSize: '14px', fontFamily: 'monospace', marginBottom: '8px', display: 'block' }}>
-              _PASSWORD:
-            </label>
-            <input 
-              type="password" 
+          <div>
+            <label className="field-label" htmlFor="login-pw">パスワード</label>
+            <input
+              id="login-pw"
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="********"
-              className="login-input"
+              placeholder={isLoginMode ? 'パスワード' : '4文字以上'}
+              className="input"
+              autoComplete={isLoginMode ? 'current-password' : 'new-password'}
             />
           </div>
 
-          <button 
-            type="submit" 
-            style={{
-              marginTop: '20px',
-              padding: '18px',
-              backgroundColor: 'transparent',
-              color: accentColor,
-              border: `2px solid ${accentColor}`,
-              fontSize: '20px',
-              fontWeight: '900',
-              cursor: 'pointer',
-              letterSpacing: '0.2em',
-              transition: 'all 0.3s',
-              fontFamily: 'monospace'
-            }}
-            onMouseOver={(e) => {
-              e.target.style.backgroundColor = accentColor;
-              e.target.style.color = '#020617';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.backgroundColor = 'transparent';
-              e.target.style.color = accentColor;
-            }}
-          >
-            {isLoginMode ? '[ LOGIN ]' : '[ SIGN UP ]'}
+          {error && <p className="text-error small" style={{ margin: 0 }}>{error}</p>}
+
+          <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={isSubmitting} style={{ marginTop: '4px' }}>
+            {isSubmitting ? '送信中…' : (isLoginMode ? 'ログイン' : '登録してはじめる')}
           </button>
         </form>
 
-        <div style={{ marginTop: '30px' }}>
-          <button 
-            onClick={() => setIsLoginMode(!isLoginMode)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'rgba(255, 255, 255, 0.5)',
-              textDecoration: 'underline',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontFamily: 'monospace'
-            }}
-          >
-            {isLoginMode ? "// 新規アカウント作成" : "// 既存アカウントでログイン"}
+        <div style={{ marginTop: '20px', textAlign: 'center' }}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={switchMode}>
+            {isLoginMode ? 'アカウントをお持ちでない方はこちら' : 'すでにアカウントをお持ちの方はこちら'}
           </button>
         </div>
       </div>
 
       <style>{`
-        .login-input {
-          width: 100%;
-          padding: 15px;
-          border-radius: 0px;
-          border: 1px solid rgba(56, 189, 248, 0.2);
-          background-color: rgba(15, 23, 42, 0.8);
-          color: white;
-          font-size: 18px;
-          font-family: 'Courier New', monospace;
-          outline: none;
-          box-sizing: border-box;
-          transition: all 0.3s;
+        .login-wrap {
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 32px 20px;
         }
-        .login-input:focus {
-          border-color: ${accentColor};
-          box-shadow: 0 0 10px ${accentColor}44;
+        .login-brand {
+          text-align: center;
+          margin-bottom: 28px;
+        }
+        .login-title {
+          font-size: 2rem;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          margin: 0;
+        }
+        .login-catch {
+          color: var(--text-2);
+          margin: 8px 0 0;
+        }
+        .login-card {
+          width: 100%;
+          max-width: 400px;
+          padding: 28px;
         }
       `}</style>
     </div>

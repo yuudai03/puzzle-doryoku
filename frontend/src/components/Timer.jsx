@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { authFetch } from '../api';
 
 // ==========================================
 // 設定
@@ -11,7 +12,7 @@ const SECONDS_PER_MINUTE = DEBUG_MODE ? 1 : 60;
 const PRESETS = {
   standard: { label: '25 / 5', focus: 25, short: 5, long: 15 },
   deep: { label: '50 / 10', focus: 50, short: 10, long: 20 },
-  custom: { label: 'CUSTOM' },
+  custom: { label: 'カスタム' },
 };
 const LONG_BREAK_EVERY = 4;       // 何セットごとに長い休憩を入れるか
 const CUSTOM_LONG_BREAK = 15;     // カスタム時の長い休憩（分）
@@ -19,9 +20,9 @@ const BOMB_MIN_MINUTES = 25;      // これ以上の集中でボム獲得（バ�
 const SETTINGS_KEY = 'pomodoroSettings';
 
 const MODE_INFO = {
-  focus: { label: '-- CURRENT MISSION: FOCUS --', color: '#38bdf8' },
-  short: { label: '-- CURRENT MISSION: RELAX --', color: '#2ed573' },
-  long: { label: '-- CURRENT MISSION: LONG RELAX --', color: '#a29bfe' },
+  focus: { label: '集中', color: 'var(--accent)', soft: 'var(--accent-soft)' },
+  short: { label: '休憩', color: 'var(--break)', soft: 'var(--break-soft)' },
+  long: { label: '長い休憩', color: 'var(--long)', soft: 'var(--long-soft)' },
 };
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -71,8 +72,6 @@ export default function Timer({ onBack, currentUser }) {
   // 通知音用
   const audioCtxRef = useRef(null);
 
-  const API_BASE = "http://127.0.0.1:5000";
-  const accentColor = MODE_INFO[mode].color;
   const totalTime = durationOf(mode);
 
   // ==========================================
@@ -80,7 +79,7 @@ export default function Timer({ onBack, currentUser }) {
   // ==========================================
   const fetchToday = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/pomodoro/today?user_id=${currentUser.id}`);
+      const response = await authFetch('/api/pomodoro/today');
       if (!response.ok) return;
       const data = await response.json();
       setToday({ minutes: data.today_minutes, sessions: data.today_sessions, target: data.target_minutes });
@@ -89,7 +88,7 @@ export default function Timer({ onBack, currentUser }) {
     } catch (error) {
       console.error("今日の記録の取得エラー:", error);
     }
-  }, [currentUser.id]);
+  }, []);
 
   useEffect(() => {
     fetchToday();
@@ -285,11 +284,9 @@ export default function Timer({ onBack, currentUser }) {
 
     // APIへのデータ送信は裏側で行う
     try {
-      const response = await fetch(`${API_BASE}/api/pomodoro/finish`, {
+      const response = await authFetch('/api/pomodoro/finish', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: currentUser.id,
           study_minutes: settings.focus,
           subject_name: targetSubject
         })
@@ -323,89 +320,111 @@ export default function Timer({ onBack, currentUser }) {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const progressPercent = totalTime > 0 ? (timeLeft / totalTime) * 100 : 0;
+  const progressPercent = totalTime > 0 ? 100 - (timeLeft / totalTime) * 100 : 0;
   const dotsFilled = mode === 'long' ? LONG_BREAK_EVERY : focusCount % LONG_BREAK_EVERY;
   const todayPercent = Math.min(100, (today.minutes / today.target) * 100);
   const settingsLocked = isActive;
+  const modeInfo = MODE_INFO[mode];
 
   return (
-    <div className="container theme-home" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', textAlign: 'center', position: 'relative', padding: '80px 20px 40px', boxSizing: 'border-box' }}>
-      <button className="btn-back" onClick={onBack}>← HOME</button>
-
-      {/* ---- 時間設定 ---- */}
-      <div className="preset-row" style={{ opacity: settingsLocked ? 0.4 : 1 }}>
-        {Object.entries(PRESETS).map(([key, p]) => (
-          <button
-            key={key}
-            className={`btn-preset ${presetKey === key ? 'active' : ''}`}
-            onClick={() => setPresetKey(key)}
-            disabled={settingsLocked}
-          >
-            {p.label}
-          </button>
-        ))}
+    <div className="page page-narrow">
+      <div className="page-header">
+        <button className="btn btn-ghost btn-back" onClick={onBack}>← ホーム</button>
       </div>
 
-      {presetKey === 'custom' && (
-        <div className="custom-row" style={{ opacity: settingsLocked ? 0.4 : 1 }}>
-          <label>
-            集中
-            <input
-              type="number" min="5" max="60" value={customFocus} disabled={settingsLocked}
-              onChange={(e) => setCustomFocus(clamp(parseInt(e.target.value, 10) || 5, 5, 60))}
-            />
-            分
-          </label>
-          <label>
-            休憩
-            <input
-              type="number" min="1" max="30" value={customShort} disabled={settingsLocked}
-              onChange={(e) => setCustomShort(clamp(parseInt(e.target.value, 10) || 1, 1, 30))}
-            />
-            分
-          </label>
-          <span style={{ fontSize: '12px', opacity: 0.6 }}>長い休憩 {CUSTOM_LONG_BREAK}分</span>
-        </div>
-      )}
-
-      {/* ---- モード表示 ---- */}
-      <div style={{ marginTop: '20px', marginBottom: '10px' }}>
-        <h2 style={{ color: accentColor, letterSpacing: '0.3em', fontSize: '1.2rem', fontFamily: 'monospace', transition: 'color 0.5s', margin: '0 0 10px' }}>
-          {MODE_INFO[mode].label}
-        </h2>
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }} title={`${LONG_BREAK_EVERY}セットごとに長い休憩`}>
-          {Array.from({ length: LONG_BREAK_EVERY }).map((_, i) => (
-            <span key={i} style={{
-              width: '12px', height: '12px', borderRadius: '50%',
-              border: `2px solid ${accentColor}`,
-              backgroundColor: i < dotsFilled ? accentColor : 'transparent',
-              boxShadow: i < dotsFilled ? `0 0 8px ${accentColor}` : 'none',
-              transition: 'all 0.3s'
-            }} />
+      {/* ---- 時間設定 ---- */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+        <div className="segmented" role="group" aria-label="時間の設定">
+          {Object.entries(PRESETS).map(([key, p]) => (
+            <button
+              key={key}
+              className={presetKey === key ? 'active' : ''}
+              onClick={() => setPresetKey(key)}
+              disabled={settingsLocked}
+            >
+              {p.label}
+            </button>
           ))}
         </div>
-        {DEBUG_MODE && (
-          <p style={{ color: '#ffa502', fontFamily: 'monospace', fontSize: '12px', margin: '8px 0 0' }}>
-            [DEBUG MODE] 1分＝1秒で動作中
-          </p>
+
+        {presetKey === 'custom' && (
+          <div className="timer-custom">
+            <label>
+              集中
+              <input
+                type="number" className="input" min="5" max="60" value={customFocus} disabled={settingsLocked}
+                onChange={(e) => setCustomFocus(clamp(parseInt(e.target.value, 10) || 5, 5, 60))}
+              />
+              分
+            </label>
+            <label>
+              休憩
+              <input
+                type="number" className="input" min="1" max="30" value={customShort} disabled={settingsLocked}
+                onChange={(e) => setCustomShort(clamp(parseInt(e.target.value, 10) || 1, 1, 30))}
+              />
+              分
+            </label>
+            <span className="text-3 small">長い休憩 {CUSTOM_LONG_BREAK}分</span>
+          </div>
         )}
       </div>
 
-      {/* ---- タイマー ---- */}
-      <div className="time-display" style={{ textShadow: `0 0 30px ${accentColor}` }}>
-        {formatTime()}
-      </div>
+      {/* ---- タイマー本体 ---- */}
+      <section className="card timer-card">
+        <div className="timer-mode">
+          <span className="badge" style={{ background: modeInfo.soft, color: modeInfo.color }}>{modeInfo.label}</span>
+          <div className="timer-dots" title={`${LONG_BREAK_EVERY}セットごとに長い休憩`}>
+            {Array.from({ length: LONG_BREAK_EVERY }).map((_, i) => (
+              <span key={i} style={{
+                borderColor: modeInfo.color,
+                background: i < dotsFilled ? modeInfo.color : 'transparent'
+              }} />
+            ))}
+          </div>
+        </div>
 
-      <div style={{ width: '600px', maxWidth: '90%', height: '4px', backgroundColor: 'rgba(255, 255, 255, 0.1)', marginBottom: '30px', borderRadius: '2px', overflow: 'hidden', boxShadow: `0 0 10px ${accentColor}33` }}>
-        <div style={{ height: '100%', width: `${progressPercent}%`, backgroundColor: accentColor, boxShadow: `0 0 15px ${accentColor}`, transition: 'width 0.25s linear, background-color 0.5s' }}></div>
-      </div>
+        <div className="timer-time num">{formatTime()}</div>
+
+        <div className="progress" style={{ margin: '0 auto 24px', maxWidth: '360px' }}>
+          <span style={{ width: `${progressPercent}%`, background: modeInfo.color }} />
+        </div>
+
+        {DEBUG_MODE && (
+          <p className="small" style={{ color: 'var(--gold)', margin: '-12px 0 16px' }}>
+            デバッグモード：1分＝1秒で動いています
+          </p>
+        )}
+
+        <div className="timer-actions">
+          <button onClick={handleStartPause} className="btn btn-primary btn-lg" style={{ minWidth: '160px', background: modeInfo.color, borderColor: modeInfo.color }}>
+            {isActive ? '一時停止' : (timeLeft < totalTime ? '再開' : 'スタート')}
+          </button>
+          <button onClick={handleReset} className="btn">リセット</button>
+          {mode !== 'focus' && (
+            <button onClick={handleSkipBreak} className="btn">休憩をスキップ</button>
+          )}
+        </div>
+
+        <label className="timer-auto">
+          <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
+          終わったら次を自動でスタート
+        </label>
+        <p className="text-3 small" style={{ margin: '4px 0 0' }}>スペースキーでもスタート／一時停止できます</p>
+      </section>
 
       {/* ---- 教科入力 ---- */}
       {mode === 'focus' && (
-        <div style={{ marginBottom: '20px', width: '600px', maxWidth: '90%' }}>
-          <input type="text" className="input-subject" placeholder="[ ENTER TARGET SUBJECT ] 例：基本情報、英語..." value={subject} onChange={(e) => setSubject(e.target.value)} disabled={isActive} maxLength={50} />
+        <section className="card">
+          <label className="field-label" htmlFor="timer-subject">何を勉強する？</label>
+          <input
+            id="timer-subject" type="text" className="input"
+            placeholder="例：基本情報、英語、統計学"
+            value={subject} onChange={(e) => setSubject(e.target.value)}
+            disabled={isActive} maxLength={50}
+          />
           {recentSubjects.length > 0 && (
-            <div className="subject-chips">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
               {recentSubjects.map((s) => (
                 <button
                   key={s}
@@ -419,96 +438,110 @@ export default function Timer({ onBack, currentUser }) {
             </div>
           )}
           {settings.focus < BOMB_MIN_MINUTES && (
-            <p style={{ fontSize: '12px', color: '#ffa502', margin: '8px 0 0' }}>
-              ※ ボムは{BOMB_MIN_MINUTES}分以上の集中で獲得できます
+            <p className="small" style={{ color: 'var(--gold)', margin: '10px 0 0' }}>
+              ボムは{BOMB_MIN_MINUTES}分以上の集中でもらえます
             </p>
           )}
-        </div>
+        </section>
       )}
 
       {message.text && (
-        <p style={{ color: message.isError ? '#ff4757' : '#2ed573', fontFamily: 'monospace', marginTop: 0, marginBottom: '20px' }}>
+        <p className={`small ${message.isError ? 'text-error' : 'text-success'}`} style={{ textAlign: 'center', margin: '16px 0' }}>
           {message.text}
         </p>
       )}
 
       {/* ---- 今日の記録 ---- */}
-      <div className="stats-panel" style={{ backgroundColor: `${accentColor}11`, border: `1px solid ${accentColor}33` }}>
-        <div>
-          <p className="stat-label" style={{ color: accentColor }}>TODAY_FOCUS</p>
-          <p className="stat-value">{today.minutes}<span className="stat-unit"> / {today.target}分</span></p>
-          <div style={{ width: '140px', height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden', margin: '6px auto 0' }}>
-            <div style={{ height: '100%', width: `${todayPercent}%`, backgroundColor: todayPercent >= 100 ? '#ffa502' : accentColor, transition: 'width 0.5s' }} />
+      <section className="stat-grid" style={{ marginTop: '16px' }}>
+        <div className="stat">
+          <p className="stat-label">今日の集中</p>
+          <p className="stat-value">{today.minutes}<span className="stat-unit">/ {today.target}分</span></p>
+          <div className="progress" style={{ marginTop: '8px' }}>
+            <span style={{ width: `${todayPercent}%`, background: todayPercent >= 100 ? 'var(--gold)' : 'var(--accent)' }} />
           </div>
         </div>
-        <div className="stat-divider" style={{ backgroundColor: `${accentColor}33` }}></div>
-        <div>
-          <p className="stat-label" style={{ color: accentColor }}>TODAY_SESSIONS</p>
-          <p className="stat-value">{today.sessions}</p>
+        <div className="stat">
+          <p className="stat-label">今日のセット数</p>
+          <p className="stat-value">{today.sessions}<span className="stat-unit">セット</span></p>
         </div>
-        <div className="stat-divider" style={{ backgroundColor: `${accentColor}33` }}></div>
-        <div>
-          <p className="stat-label" style={{ color: '#ff4757' }}>BOMB_STOCK</p>
-          <p className="stat-value" style={{ color: '#ff4757', textShadow: '0 0 10px rgba(255, 71, 87, 0.5)' }}>{bombs}</p>
+        <div className="stat">
+          <p className="stat-label">ボム</p>
+          <p className="stat-value" style={{ color: 'var(--bomb)' }}>{bombs}<span className="stat-unit">個</span></p>
         </div>
-      </div>
-
-      {/* ---- 操作ボタン ---- */}
-      <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', justifyContent: 'center' }}>
-        <button onClick={handleStartPause} className="btn-timer-main" style={{ borderColor: accentColor, backgroundColor: isActive ? 'transparent' : accentColor, color: isActive ? accentColor : '#020617', boxShadow: isActive ? 'none' : `0 0 15px ${accentColor}44` }}>
-          {isActive ? 'PAUSE' : 'START'}
-        </button>
-        <button onClick={handleReset} className="btn-timer-sub">RESET</button>
-        {mode !== 'focus' && (
-          <button onClick={handleSkipBreak} className="btn-timer-sub">SKIP ▶</button>
-        )}
-      </div>
-
-      <label className="auto-start">
-        <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
-        終わったら次を自動でスタート
-      </label>
-      <p style={{ fontSize: '12px', opacity: 0.4, marginTop: '6px' }}>Space キーでスタート / 一時停止</p>
+      </section>
 
       <style>{`
-        .btn-back { position: absolute; top: 30px; left: 40px; background: transparent; color: #d1d5db; border: none; font-size: 26px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; padding: 10px; letter-spacing: 0.05em; }
-        .btn-back:hover { color: white; transform: translateX(-5px); text-shadow: 0 0 10px rgba(255, 255, 255, 0.4); }
-
-        .preset-row { display: flex; gap: 10px; transition: opacity 0.3s; }
-        .btn-preset { background: rgba(15, 23, 42, 0.5); color: rgba(255,255,255,0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 4px; font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold; padding: 8px 18px; cursor: pointer; letter-spacing: 0.1em; transition: all 0.2s; }
-        .btn-preset:hover:not(:disabled) { border-color: #38bdf8; color: white; }
-        .btn-preset.active { background: #38bdf8; color: #020617; border-color: #38bdf8; box-shadow: 0 0 12px rgba(56, 189, 248, 0.5); }
-        .btn-preset:disabled { cursor: not-allowed; }
-
-        .custom-row { display: flex; gap: 20px; align-items: center; margin-top: 12px; color: rgba(255,255,255,0.8); font-family: 'Courier New', monospace; flex-wrap: wrap; justify-content: center; }
-        .custom-row input { width: 60px; margin: 0 6px; padding: 6px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 4px; color: white; font-size: 16px; text-align: center; }
-
-        .time-display { font-size: 12rem; font-family: 'Courier New', monospace; font-weight: 900; color: white; line-height: 1; margin-bottom: 20px; transition: text-shadow 0.5s; }
-        @media (max-width: 700px) { .time-display { font-size: 6rem; } }
-
-        .input-subject { width: 100%; padding: 15px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 4px; color: white; font-family: 'Courier New', monospace; font-size: 1.2rem; text-align: center; letter-spacing: 0.1em; outline: none; transition: all 0.3s; box-sizing: border-box; }
-        .input-subject:focus { border-color: #38bdf8; box-shadow: 0 0 15px rgba(56, 189, 248, 0.4); }
-        .input-subject:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        .subject-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; }
-        .chip { background: transparent; color: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.25); border-radius: 999px; padding: 4px 14px; font-size: 13px; cursor: pointer; transition: all 0.2s; }
-        .chip:hover:not(:disabled) { border-color: #38bdf8; color: white; }
-        .chip.active { border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.1); }
-        .chip:disabled { opacity: 0.4; cursor: not-allowed; }
-
-        .stats-panel { display: flex; gap: 32px; margin-bottom: 30px; padding: 20px 36px; border-radius: 4px; transition: all 0.5s; flex-wrap: wrap; justify-content: center; }
-        .stat-label { font-size: 12px; margin: 0; transition: color 0.5s; }
-        .stat-value { font-size: 2rem; margin: 0; font-weight: bold; color: white; }
-        .stat-unit { font-size: 0.9rem; opacity: 0.6; font-weight: normal; }
-        .stat-divider { width: 1px; }
-
-        .btn-timer-main { width: 280px; padding: 20px; font-family: 'Courier New', monospace; font-size: 1.5rem; font-weight: 900; cursor: pointer; transition: all 0.3s; letter-spacing: 0.2em; }
-        .btn-timer-main:hover { transform: scale(1.02); }
-        .btn-timer-sub { width: 140px; background: transparent; color: rgba(255, 255, 255, 0.6); border: 1px solid rgba(255,255,255,0.3); font-family: 'Courier New', monospace; font-size: 1rem; font-weight: bold; cursor: pointer; transition: all 0.3s; letter-spacing: 0.1em; }
-        .btn-timer-sub:hover { background: rgba(255,255,255,0.1); color: white; border-color: white; }
-
-        .auto-start { margin-top: 24px; color: rgba(255,255,255,0.7); font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
-        .auto-start input { width: 16px; height: 16px; accent-color: #38bdf8; cursor: pointer; }
+        .timer-custom {
+          display: flex;
+          gap: 16px;
+          align-items: center;
+          flex-wrap: wrap;
+          justify-content: center;
+          color: var(--text-2);
+          font-size: 0.9rem;
+        }
+        .timer-custom label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .timer-custom .input {
+          width: 72px;
+          padding: 6px 8px;
+          text-align: center;
+        }
+        .timer-card {
+          text-align: center;
+          padding: 28px 24px 24px;
+          margin-top: 20px;
+        }
+        .timer-mode {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 14px;
+        }
+        .timer-dots {
+          display: flex;
+          gap: 6px;
+        }
+        .timer-dots span {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          border: 2px solid;
+          transition: background-color 0.3s;
+        }
+        .timer-time {
+          font-size: 6.5rem;
+          font-weight: 700;
+          line-height: 1.1;
+          letter-spacing: 0.02em;
+          margin: 16px 0 20px;
+        }
+        .timer-actions {
+          display: flex;
+          gap: 10px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .timer-auto {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 20px;
+          color: var(--text-2);
+          font-size: 0.9rem;
+          cursor: pointer;
+        }
+        .timer-auto input {
+          width: 16px;
+          height: 16px;
+          accent-color: var(--accent);
+        }
+        @media (max-width: 600px) {
+          .timer-time { font-size: 4.5rem; }
+        }
       `}</style>
     </div>
   );
