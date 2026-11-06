@@ -9,7 +9,9 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    c.execute('DROP TABLE IF EXISTS users')
+    # ⚠️ 以前はここで DROP TABLE users をしていたため、実行するたびに全ユーザーが消えていた。
+    #    CREATE TABLE IF NOT EXISTS だけにして、何度実行してもデータが残るようにした。
+    #    完全にリセットしたいときは backend/hackathon.db を削除してから実行する。
 
     # users テーブル
     c.execute('''

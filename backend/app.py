@@ -7,6 +7,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 CORS(app)
 
+# ゲームバランス用の設定値
+DAILY_TARGET_MINUTES = 100  # デイリーミッションの目標時間（分）
+BOMB_MIN_MINUTES = 25       # この分数以上の集中でボムを1個獲得（短い設定でボムを量産できないように）
+
 # データベースのパス設定
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'hackathon.db')
@@ -71,10 +75,14 @@ def finish_pomodoro():
     data = request.get_json()
     user_id = data.get('user_id')
     study_minutes = data.get('study_minutes', 25)
-    subject_name = data.get('subject_name', 'その他')
+    subject_name = (data.get('subject_name') or 'その他').strip()[:50] or 'その他'
 
     if not user_id:
         return jsonify({"status": "error", "message": "user_idは必須です"}), 400
+
+    # 勉強時間は 1〜60分の整数だけ受け付ける（不正な値で時間やボムを稼げないように）
+    if not isinstance(study_minutes, int) or isinstance(study_minutes, bool) or not (1 <= study_minutes <= 60):
+        return jsonify({"status": "error", "message": "study_minutesは1〜60の整数で指定してください"}), 400
 
     conn = get_db_connection()
     c = conn.cursor()
@@ -99,11 +107,13 @@ def finish_pomodoro():
         VALUES (?, ?, ?)
     ''', (user_id, subject_name, study_minutes))
 
-    # 🌟 3. bombsテーブルに「3日後の有効期限付き」でボムを追加！
-    c.execute('''
-        INSERT INTO bombs (user_id, expires_at) 
-        VALUES (?, datetime('now', 'localtime', '+3 days'))
-    ''', (user_id,))
+    # 🌟 3. 25分以上の集中なら、bombsテーブルに「3日後の有効期限付き」でボムを追加！
+    bomb_given = 1 if study_minutes >= BOMB_MIN_MINUTES else 0
+    if bomb_given:
+        c.execute('''
+            INSERT INTO bombs (user_id, expires_at) 
+            VALUES (?, datetime('now', 'localtime', '+3 days'))
+        ''', (user_id,))
 
     conn.commit()
 
@@ -120,9 +130,57 @@ def finish_pomodoro():
         "status": "success",
         "reward": {
             "item_type": "bomb",
-            "amount_given": 1,
+            "amount_given": bomb_given,
             "total_bombs_owned": current_bombs
         }
+    })
+
+# 今日の学習記録（タイマー画面用）：今日の集中時間・セット数・最近使った教科・ボム数
+@app.route('/api/pomodoro/today', methods=['GET'])
+def get_today_summary():
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({"status": "error", "message": "user_idは必須です"}), 400
+
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    # 今日の合計時間とセット数
+    c.execute('''
+        SELECT COUNT(*) as sessions, COALESCE(SUM(study_minutes), 0) as minutes
+        FROM study_logs
+        WHERE user_id = ? AND date(created_at, 'localtime') = date('now', 'localtime')
+    ''', (user_id,))
+    today = c.fetchone()
+
+    # 最近使った教科（新しい順に最大6件、未入力の NO_TARGET は除く）
+    c.execute('''
+        SELECT subject_name, MAX(id) as last_id
+        FROM study_logs
+        WHERE user_id = ? AND subject_name IS NOT NULL AND subject_name != 'NO_TARGET'
+        GROUP BY subject_name
+        ORDER BY last_id DESC
+        LIMIT 6
+    ''', (user_id,))
+    recent_subjects = [row['subject_name'] for row in c.fetchall()]
+
+    # 有効なボム数
+    c.execute('''
+        SELECT COUNT(*) as valid_bombs FROM bombs
+        WHERE user_id = ? AND expires_at > datetime('now', 'localtime')
+    ''', (user_id,))
+    bombs = c.fetchone()['valid_bombs']
+
+    conn.close()
+
+    return jsonify({
+        "status": "success",
+        "today_minutes": today['minutes'],
+        "today_sessions": today['sessions'],
+        "target_minutes": DAILY_TARGET_MINUTES,
+        "recent_subjects": recent_subjects,
+        "bomb_count": bombs,
+        "bomb_min_minutes": BOMB_MIN_MINUTES
     })
 
 # アイテム（ボム）所持数の確認
@@ -216,7 +274,12 @@ def submit_score():
     data = request.get_json()
     user_id = data.get('user_id')
     score = data.get('score', 0)
-    
+
+    if not user_id:
+        return jsonify({"status": "error", "message": "user_idは必須です"}), 400
+    if not isinstance(score, int) or isinstance(score, bool) or score < 0:
+        return jsonify({"status": "error", "message": "scoreは0以上の整数で指定してください"}), 400
+
     conn = get_db_connection()
     c = conn.cursor()
     c.execute('INSERT INTO scores (user_id, score) VALUES (?, ?)', (user_id, score))
@@ -290,7 +353,7 @@ def request_friend():
         return jsonify({"status": "error", "message": "そのIDのユーザーは存在しません"}), 404
 
     try:
-        c.execute('INSERT INTO friends (user_id, friend_id, status) VALUES (?, ?, "pending")', (user_id, friend_id))
+        c.execute("INSERT INTO friends (user_id, friend_id, status) VALUES (?, ?, 'pending')", (user_id, friend_id))
         conn.commit()
         return jsonify({"status": "success", "message": f"{friend_id}にフレンド申請を送りました！"}), 201
     except sqlite3.IntegrityError:
@@ -319,7 +382,7 @@ def accept_friend():
         return jsonify({"status": "error", "message": "承認できる申請が見つかりません"}), 404
 
     try:
-        c.execute('INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, "accepted")', (user_id, friend_id))
+        c.execute("INSERT OR IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, 'accepted')", (user_id, friend_id))
         conn.commit()
     except sqlite3.IntegrityError:
         pass
@@ -439,7 +502,7 @@ def get_daily_mission():
 
     conn.close()
 
-    target_minutes = 100  # ★デイリーミッションの目標時間（ここは自由に変更OK！）
+    target_minutes = DAILY_TARGET_MINUTES
 
     return jsonify({
         "status": "success",
@@ -469,7 +532,7 @@ def claim_daily_reward():
     row = c.fetchone()
     today_minutes = row['today_minutes'] if row['today_minutes'] else 0
 
-    target_minutes = 100 
+    target_minutes = DAILY_TARGET_MINUTES
 
     if today_minutes < target_minutes:
         conn.close()
