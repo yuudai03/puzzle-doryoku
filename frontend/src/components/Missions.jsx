@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { authFetch } from '../api';
 
-export default function Missions({ onBack, currentUser }) {
-  const accentColor = '#38bdf8';
-  
+export default function Missions({ onBack }) {
   const [missionData, setMissionData] = useState({
     today_minutes: 0,
     target_minutes: 100,
@@ -10,145 +9,97 @@ export default function Missions({ onBack, currentUser }) {
     is_claimed: false
   });
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState({ text: '', isError: false });
 
-  useEffect(() => {
-    fetchMissionData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // [12] デイリー進捗確認 (GET)
-  const fetchMissionData = async () => {
+  // デイリー進捗確認 (GET)
+  const fetchMissionData = useCallback(async () => {
     try {
-      // ★ 修正点1: Timerと同じ 127.0.0.1 に統一
-      // ★ 修正点2: cache: 'no-store' でブラウザの記憶を無視し、常に最新をDBから取得する！
-      const response = await fetch(`http://127.0.0.1:5000/api/missions/daily?user_id=${currentUser.id}`, {
-        cache: 'no-store'
-      });
-      
+      // authFetch はトークンを自動でつけ、キャッシュも使わず常に最新をDBから取得する
+      const response = await authFetch('/api/missions/daily');
       if (response.ok) {
         const data = await response.json();
         setMissionData(data);
-        console.log("ミッション最新データ取得:", data);
       } else {
-        console.error("ミッションデータの取得に失敗しました");
+        setMessage({ text: 'ミッションの情報を取得できませんでした', isError: true });
       }
     } catch (error) {
       console.error("通信エラー:", error);
+      setMessage({ text: 'サーバーに接続できませんでした', isError: true });
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // [13] デイリー報酬受け取り (POST)
+  useEffect(() => {
+    fetchMissionData();
+  }, [fetchMissionData]);
+
+  // デイリー報酬受け取り (POST)
   const handleClaimReward = async () => {
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/missions/claim', {
+      const response = await authFetch('/api/missions/claim', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ user_id: currentUser.id }),
       });
-
       const data = await response.json();
-
-      if (response.ok) {
-        alert(`>> MISSION COMPLETE: ${data.message}`);
-        fetchMissionData(); // 受け取った後の最新データに更新する
-      } else {
-        alert(`エラー: ${data.message || '報酬の受け取りに失敗しました'}`);
-      }
+      setMessage({ text: data.message || '', isError: !response.ok });
+      if (response.ok) fetchMissionData();
     } catch (error) {
       console.error("通信エラー:", error);
-      alert("通信エラーが発生しました。サーバーが起動しているか確認してください。");
+      setMessage({ text: '通信エラーが発生しました', isError: true });
     }
   };
 
+  const percent = Math.min(100, (missionData.today_minutes / missionData.target_minutes) * 100);
+  const remaining = Math.max(0, missionData.target_minutes - missionData.today_minutes);
+
   return (
-    <div className="container" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      backgroundColor: '#0f172a',
-      color: 'white',
-      fontFamily: 'monospace',
-      position: 'relative'
-    }}>
-      
-      {/* 戻るボタン */}
-      <button 
-        onClick={onBack}
-        style={{
-          position: 'absolute',
-          top: '20px',
-          left: '20px',
-          background: 'transparent',
-          color: accentColor,
-          border: `1px solid ${accentColor}`,
-          padding: '8px 16px',
-          cursor: 'pointer',
-          fontFamily: 'monospace'
-        }}
-      >
-        [ BACK ]
-      </button>
+    <div className="page page-narrow">
+      <div className="page-header">
+        <button className="btn btn-ghost btn-back" onClick={onBack}>← ホーム</button>
+      </div>
 
-      <h2 style={{ color: accentColor, fontSize: '2.5rem', marginBottom: '40px', letterSpacing: '0.2em' }}>
-        DAILY MISSIONS
-      </h2>
+      <div style={{ marginBottom: '20px' }}>
+        <h1 className="page-title">デイリーミッション</h1>
+        <p className="page-lead">1日{missionData.target_minutes}分集中すると、ボムを1個もらえます（1日1回）。</p>
+      </div>
 
-      {loading ? (
-        <p style={{ color: accentColor }}>[ LOADING DATA... ]</p>
-      ) : (
-        <div style={{
-          background: 'rgba(30, 41, 59, 0.8)',
-          border: `1px solid ${accentColor}`,
-          padding: '40px',
-          borderRadius: '8px',
-          width: '80%',
-          maxWidth: '500px',
-          textAlign: 'center',
-          boxShadow: `0 0 20px rgba(56, 189, 248, 0.2)`
-        }}>
-          
-          <h3 style={{ fontSize: '1.5rem', marginBottom: '20px' }}>本日の勉強時間</h3>
-          
-          <div style={{ fontSize: '3rem', fontWeight: 'bold', color: accentColor, marginBottom: '10px' }}>
-            {missionData.today_minutes} / {missionData.target_minutes} <span style={{ fontSize: '1.5rem' }}>MIN</span>
-          </div>
+      <section className="card" style={{ padding: '28px' }}>
+        {loading ? (
+          <p className="text-3" style={{ margin: 0 }}>読み込み中…</p>
+        ) : (
+          <>
+            <p className="text-2 small" style={{ margin: 0 }}>今日の集中</p>
+            <p className="num" style={{ fontSize: '2.6rem', fontWeight: 700, margin: '2px 0 12px', lineHeight: 1.2 }}>
+              {missionData.today_minutes}
+              <span className="stat-unit"> / {missionData.target_minutes}分</span>
+            </p>
+            <div className="progress" style={{ height: '10px' }}>
+              <span style={{ width: `${percent}%`, background: missionData.is_cleared ? 'var(--gold)' : 'var(--accent)' }} />
+            </div>
 
-          <div style={{ margin: '30px 0' }}>
-            {missionData.is_claimed ? (
-              <p style={{ color: '#10b981', fontSize: '1.2rem', fontWeight: 'bold' }}>
-                [ 報酬獲得済み / REWARD CLAIMED ]
-              </p>
-            ) : missionData.is_cleared ? (
-              <button 
-                onClick={handleClaimReward}
-                style={{
-                  background: accentColor,
-                  color: '#0f172a',
-                  border: 'none',
-                  padding: '15px 30px',
-                  fontSize: '1.2rem',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  borderRadius: '4px',
-                  boxShadow: `0 0 15px ${accentColor}`,
-                  fontFamily: 'monospace'
-                }}
-              >
-                [ GET REWARD (BOMB +1) ]
-              </button>
-            ) : (
-              <p style={{ color: '#94a3b8', fontSize: '1.2rem' }}>
-                ミッション未達成 (INCOMPLETE)
-              </p>
-            )}
-          </div>
-        </div>
+            <div style={{ marginTop: '24px' }}>
+              {missionData.is_claimed ? (
+                <p className="text-success" style={{ margin: 0, fontWeight: 500 }}>
+                  今日の報酬は受け取り済みです。また明日！
+                </p>
+              ) : missionData.is_cleared ? (
+                <button onClick={handleClaimReward} className="btn btn-primary btn-lg">
+                  報酬を受け取る（ボム +1）
+                </button>
+              ) : (
+                <p className="text-2" style={{ margin: 0 }}>
+                  あと <strong className="num">{remaining}分</strong> で達成です
+                </p>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+
+      {message.text && (
+        <p className={`small ${message.isError ? 'text-error' : 'text-success'}`} style={{ marginTop: '12px' }}>
+          {message.text}
+        </p>
       )}
     </div>
   );

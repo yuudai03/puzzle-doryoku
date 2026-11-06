@@ -1,6 +1,7 @@
 // src/components/PuzzleBoard.jsx
 
 import React, { useState, useEffect, useRef } from 'react';
+import { authFetch } from '../api';
 import {
   createBoard,
   removeBlocks,
@@ -33,7 +34,6 @@ export default function PuzzleBoard({ onBack, userId }) {
   const comboTimerRef = useRef(null);
   const [popups, setPopups] = useState([]);
 
-  const API_BASE = "http://127.0.0.1:5000";
 
   useEffect(() => {
     return () => {
@@ -49,7 +49,7 @@ export default function PuzzleBoard({ onBack, userId }) {
     const fetchInventory = async () => {
       if (!userId) return; 
       try {
-        const response = await fetch(`${API_BASE}/api/user/inventory?user_id=${userId}`);
+        const response = await authFetch('/api/user/inventory');
         if (response.ok) {
           const data = await response.json();
           // API側で「有効期限内のボム」だけを計算して返してくれるので、そのままセット！
@@ -68,10 +68,9 @@ export default function PuzzleBoard({ onBack, userId }) {
     setGameOverReason(reason);
     setIsGameOver(true);
     if (!userId) return;
-    fetch(`${API_BASE}/api/game/score`, {
+    authFetch('/api/game/score', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, score: score }),
+      body: JSON.stringify({ score: score }),
     }).catch(() => {});
   };
 
@@ -192,10 +191,8 @@ export default function PuzzleBoard({ onBack, userId }) {
 
       // 🌟 バックエンド新仕様対応：ボム消費API
       // APIを叩くだけで、裏側で勝手に「一番古いボム」から消費してくれます！フロントは楽チン！
-      fetch(`${API_BASE}/api/game/use_bomb`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId })
+      authFetch('/api/game/use_bomb', {
+        method: 'POST'
       }).catch(err => console.error("💣 ボム消費エラー:", err));
 
     } else {
@@ -259,11 +256,11 @@ export default function PuzzleBoard({ onBack, userId }) {
 
   const getBlockColor = (value) => {
     switch (value) {
-      case 1: return '#ff4757';
-      case 2: return '#1e90ff';
-      case 3: return '#2ed573';
-      case 4: return '#ffa502';
-      case 5: return '#576574'; 
+      case 1: return '#E24B4A';
+      case 2: return '#378ADD';
+      case 3: return '#1D9E75';
+      case 4: return '#EF9F27';
+      case 5: return '#B4B2A9'; 
       default: return 'transparent';
     }
   };
@@ -272,8 +269,10 @@ export default function PuzzleBoard({ onBack, userId }) {
 
   if (board.length === 0) return null;
 
+  const canUseBomb = isGameStarted && bombCount > 0 && !isGameOver && !isPaused;
+
   return (
-    <div className="puzzle-screen game-container" style={styles.screenContainer}>
+    <div className="page puzzle-page">
       <style>
         {`
           @keyframes floatUpFade {
@@ -284,90 +283,76 @@ export default function PuzzleBoard({ onBack, userId }) {
         `}
       </style>
 
-      <div onClick={onBack} style={styles.backButton}>← HOME</div>
+      <div className="page-header" style={{ justifyContent: 'space-between' }}>
+        <button className="btn btn-ghost btn-back" onClick={onBack}>← ホーム</button>
+        {isGameStarted && !isGameOver && (
+          <button className="btn btn-sm" onClick={() => setIsPaused(true)}>一時停止</button>
+        )}
+      </div>
 
-      <div style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <div style={styles.timerDisplay}>⏱ {formatTime(timeLeft)}</div>
-          {isGameStarted && !isGameOver && (
-            <button 
-              onClick={() => setIsPaused(true)} 
-              style={styles.pauseBtnIcon}
-            >
-              ⏸
-            </button>
-          )}
+      {/* ---- スコアなど ---- */}
+      <div className="puzzle-stats">
+        <div className="stat">
+          <p className="stat-label">残り時間</p>
+          <p className="stat-value" style={{ color: timeLeft <= 10 ? 'var(--danger)' : 'var(--text)' }}>{formatTime(timeLeft)}</p>
         </div>
-
-        <div style={styles.infoDisplay}>
-          <div style={styles.scoreText}>SCORE: {score}</div>
-          <div style={styles.bombText}>💣: {bombCount} <span style={{fontSize: '14px', color: '#ccc'}}>(有効)</span></div>
-          <div style={{
-            ...styles.comboContainer,
-            visibility: comboCount > 0 ? 'visible' : 'hidden'
-          }}>
-            <span style={styles.comboText}>{comboCount} COMBO!! 🔥</span>
-            <span style={styles.multiplierText}>×{currentMultiplier}</span>
-          </div>
+        <div className="stat">
+          <p className="stat-label">スコア</p>
+          <p className="stat-value">{score.toLocaleString()}</p>
+        </div>
+        <div className="stat">
+          <p className="stat-label">ボム（有効期限内）</p>
+          <p className="stat-value" style={{ color: 'var(--bomb)' }}>{bombCount}<span className="stat-unit">個</span></p>
         </div>
       </div>
 
-      <div style={{
-        ...styles.boardPanel,
-        opacity: isGameOver || isPaused ? 0.3 : 1 
-      }}>
-        <div style={styles.boardInner}>
-          {board.map((row, y) => 
+      <div className="puzzle-combo" style={{ visibility: comboCount > 0 ? 'visible' : 'hidden' }}>
+        <span style={{ fontWeight: 700 }}>{comboCount} コンボ</span>
+        <span className="badge" style={{ background: 'var(--gold-soft)', color: 'var(--gold)' }}>×{currentMultiplier}</span>
+      </div>
+
+      {/* ---- 盤面 ---- */}
+      <div className="puzzle-board" style={{ opacity: isGameOver || isPaused ? 0.35 : 1 }}>
+        <div className="puzzle-board-inner game-container">
+          {board.map((row, y) =>
             row.map((block, x) => {
-              const isHoveredBombRange = isBombMode && 
+              const isHoveredBombRange = isBombMode &&
                                          hoveredBlock.x !== -1 && hoveredBlock.y !== -1 &&
-                                         Math.abs(hoveredBlock.x - x) <= 1 && 
+                                         Math.abs(hoveredBlock.x - x) <= 1 &&
                                          Math.abs(hoveredBlock.y - y) <= 1;
+              const isActiveHover = isHoveredBombRange && block.color !== 0 && !isGameOver && !isPaused;
 
               return (
                 <div
-                  key={block.id} 
+                  key={block.id}
                   onClick={(e) => handleBlockClick(e, x, y)}
                   onMouseEnter={() => isBombMode && setHoveredBlock({ x, y })}
                   onMouseLeave={() => isBombMode && setHoveredBlock({ x: -1, y: -1 })}
+                  className="puzzle-block"
                   style={{
-                    ...styles.block,
-                    position: 'absolute', 
-                    left: `${x * 56}px`,  
-                    top: `${y * 56}px`,   
+                    left: `${x * 56}px`,
+                    top: `${y * 56}px`,
                     backgroundColor: getBlockColor(block.color),
                     cursor: block.color === 0 || block.color === 5 || isGameOver || !isGameStarted || isPaused ? 'default' : (isBombMode ? 'crosshair' : 'pointer'),
-                    
-                    opacity: block.color === 0 ? 0 : (isBombMode ? (isHoveredBombRange ? 1 : 0.3) : 1),
-                    transform: block.color === 0 ? 'scale(0)' : (isHoveredBombRange && !isGameOver && !isPaused ? 'scale(1.08)' : 'scale(1)'),
-                    
-                    border: isHoveredBombRange && block.color !== 0 && !isGameOver && !isPaused ? '3px solid #ffffff' : 'none',
-                    boxShadow: isHoveredBombRange && block.color !== 0 && !isGameOver && !isPaused
-                      ? '0 0 15px rgba(255, 255, 255, 0.9), inset 0 0 10px rgba(255, 255, 255, 0.5)' 
-                      : (block.color !== 0 && block.color !== 5 ? 'inset 0 -5px 0 rgba(0,0,0,0.15)' : 'none'),
-                    zIndex: isHoveredBombRange ? 2 : 1, 
-                    
-                    transition: 'top 0.4s cubic-bezier(0.25, 1, 0.5, 1), left 0.4s ease, transform 0.2s ease, opacity 0.2s ease',
+                    opacity: block.color === 0 ? 0 : (isBombMode ? (isHoveredBombRange ? 1 : 0.35) : 1),
+                    transform: block.color === 0 ? 'scale(0)' : (isActiveHover ? 'scale(1.06)' : 'scale(1)'),
+                    boxShadow: isActiveHover
+                      ? '0 0 0 3px #2C2C2A'
+                      : (block.color !== 0 && block.color !== 5 ? 'inset 0 -4px 0 rgba(0,0,0,0.12)' : 'none'),
+                    zIndex: isHoveredBombRange ? 2 : 1,
                   }}
                 >
-                  {block.color === 5 && <span style={{ fontSize: '26px' }}>🪨</span>}
+                  {block.color === 5 && <span style={{ fontSize: '24px' }}>🪨</span>}
                 </div>
               );
             })
           )}
 
           {popups.map(popup => (
-            <div key={popup.id} style={{
-              position: 'absolute',
+            <div key={popup.id} className="puzzle-popup" style={{
               left: `${popup.x}px`,
               top: `${popup.y}px`,
-              pointerEvents: 'none',
-              zIndex: 10,
               color: popup.color,
-              fontSize: '32px',
-              fontWeight: '900',
-              textShadow: '0px 0px 5px rgba(255,255,255,1), 0px 0px 10px rgba(0,0,0,0.8)',
-              animation: 'floatUpFade 0.8s ease-out forwards',
             }}>
               +{popup.count}
             </div>
@@ -375,109 +360,128 @@ export default function PuzzleBoard({ onBack, userId }) {
         </div>
       </div>
 
-      <div style={styles.bombBtnContainer}>
-        <button 
+      {/* ---- ボムボタン ---- */}
+      <div style={{ textAlign: 'center', marginTop: '20px' }}>
+        <button
           onClick={() => {
-            if (isGameStarted && bombCount > 0 && !isGameOver && !isPaused) {
+            if (canUseBomb) {
               setIsBombMode(!isBombMode);
-              if (isBombMode) setHoveredBlock({ x: -1, y: -1 }); 
+              if (isBombMode) setHoveredBlock({ x: -1, y: -1 });
             }
           }}
-          disabled={!isGameStarted || isGameOver || bombCount <= 0 || isPaused} 
+          disabled={!canUseBomb}
+          className="btn btn-lg"
           style={{
-            ...styles.bombBtn,
-            background: isBombMode ? 'linear-gradient(45deg, #ff4757, #ff6b81)' : 'linear-gradient(45deg, #1e90ff, #70a1ff)',
-            boxShadow: isBombMode ? styles.bombBtnShadowRed : (bombCount > 0 && isGameStarted && !isGameOver && !isPaused ? styles.bombBtnShadowBlue : 'none'),
-            opacity: bombCount > 0 && isGameStarted && !isGameOver && !isPaused ? 1 : 0.5,
-            cursor: bombCount > 0 && isGameStarted && !isGameOver && !isPaused ? 'pointer' : 'not-allowed',
+            minWidth: '240px',
+            background: isBombMode ? 'var(--bomb)' : 'var(--surface)',
+            borderColor: 'var(--bomb)',
+            color: isBombMode ? '#fff' : 'var(--bomb)',
+            fontWeight: 700,
           }}
         >
-          {isBombMode ? '💣 落とす場所をタップ！' : `💣 ボムを使う`}
+          {isBombMode ? '使う場所をタップ（もう一度押すとキャンセル）' : `ボムを使う（残り${bombCount}個）`}
         </button>
+        <p className="text-3 small" style={{ marginTop: '10px' }}>
+          同じ色が3つ以上つながったブロックをタップで消せます。岩はボムでしか壊せません。
+        </p>
       </div>
 
+      {/* ---- スタート ---- */}
       {!isGameStarted && !isGameOver && (
-        <div style={styles.overlay}>
-          <div style={styles.startPanel}>
-            <h1 style={styles.titleText}>PUZZLE START</h1>
-            <button onClick={() => setIsGameStarted(true)} style={styles.startBtn}>MISSION START</button>
-          </div>
-        </div>
-      )}
-      
-      {isPaused && (
-        <div style={styles.overlay}>
-          <div style={styles.pausePanel}>
-            <h1 style={styles.titleText}>PAUSE</h1>
-            <button onClick={() => setIsPaused(false)} style={styles.resumeBtn}>▶ RESUME</button>
-            <div style={{ marginTop: '20px' }}>
-              <button onClick={onBack} style={styles.goHomeBtn}>ホームへ戻る</button>
-            </div>
+        <div className="modal-overlay">
+          <div className="modal" style={{ textAlign: 'center' }}>
+            <h2 className="page-title" style={{ marginBottom: '8px' }}>パズル</h2>
+            <p className="text-2" style={{ margin: '0 0 20px' }}>
+              制限時間は60秒。ボムは {bombCount}個 持っています。
+            </p>
+            <button onClick={() => setIsGameStarted(true)} className="btn btn-primary btn-lg btn-block">スタート</button>
+            <button onClick={onBack} className="btn btn-ghost btn-block" style={{ marginTop: '8px' }}>ホームへ戻る</button>
           </div>
         </div>
       )}
 
-      {isGameOver && (
-        <div style={styles.overlay}>
-          <div style={styles.gameOverPanel}>
-            <h1 style={styles.timeUpText}>{gameOverReason}</h1>
-            <h2 style={styles.finalScoreText}>Score: {score}</h2>
-            <button onClick={onBack} style={styles.goHomeBtn}>ホームへ戻る</button>
+      {/* ---- 一時停止 ---- */}
+      {isPaused && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ textAlign: 'center' }}>
+            <h2 className="page-title" style={{ marginBottom: '20px' }}>一時停止中</h2>
+            <button onClick={() => setIsPaused(false)} className="btn btn-primary btn-lg btn-block">再開する</button>
+            <button onClick={onBack} className="btn btn-ghost btn-block" style={{ marginTop: '8px' }}>ホームへ戻る</button>
           </div>
         </div>
       )}
+
+      {/* ---- 終了 ---- */}
+      {isGameOver && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ textAlign: 'center' }}>
+            <p className="text-2" style={{ margin: 0 }}>
+              {gameOverReason === 'TIME UP!' ? '時間切れ' : '消せるブロックがなくなりました'}
+            </p>
+            <p className="text-3 small" style={{ margin: '16px 0 0' }}>スコア</p>
+            <p className="num" style={{ fontSize: '3rem', fontWeight: 700, margin: '0 0 20px', lineHeight: 1.2 }}>
+              {score.toLocaleString()}
+            </p>
+            <button onClick={onBack} className="btn btn-primary btn-lg btn-block">ホームへ戻る</button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        .puzzle-page {
+          max-width: 560px;
+        }
+        .puzzle-stats {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .puzzle-combo {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          height: 32px;
+          margin: 10px 0;
+          color: var(--gold);
+        }
+        .puzzle-board {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          padding: 14px;
+          width: fit-content;
+          margin: 0 auto;
+          transition: opacity 0.3s;
+        }
+        .puzzle-board-inner {
+          position: relative;
+          width: 442px;
+          height: 442px;
+        }
+        .puzzle-block {
+          position: absolute;
+          width: 50px;
+          height: 50px;
+          border-radius: 10px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          transition: top 0.4s cubic-bezier(0.25, 1, 0.5, 1), left 0.4s ease, transform 0.2s ease, opacity 0.2s ease, box-shadow 0.15s;
+        }
+        .puzzle-popup {
+          position: absolute;
+          pointer-events: none;
+          z-index: 10;
+          font-size: 30px;
+          font-weight: 700;
+          text-shadow: 0 0 4px #fff, 0 0 8px #fff;
+          animation: floatUpFade 0.8s ease-out forwards;
+        }
+        @media (max-width: 520px) {
+          .puzzle-board { transform: scale(0.72); transform-origin: top center; margin-bottom: -125px; }
+        }
+      `}</style>
     </div>
   );
 }
-
-const styles = {
-  screenContainer: {
-    backgroundColor: '#0a0e17', color: '#f1f2f6', fontFamily: 'sans-serif',
-    position: 'relative', minHeight: '100vh',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '60px',
-  },
-  backButton: { position: 'absolute', top: '20px', left: '20px', fontSize: '18px', fontWeight: 'bold', color: '#f1f2f6', cursor: 'pointer', opacity: 0.8 },
-  header: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '40px', marginBottom: '20px', width: '90%', maxWidth: '600px' },
-  timerDisplay: { fontSize: '64px', fontWeight: 'bold', color: '#1e90ff', textShadow: '0 0 10px rgba(30, 144, 255, 0.7), 0 0 20px rgba(30, 144, 255, 0.5)' },
-  
-  pauseBtnIcon: { 
-    background: 'none', border: '2px solid #1e90ff', color: '#1e90ff', fontSize: '24px', 
-    borderRadius: '50%', width: '48px', height: '48px', cursor: 'pointer',
-    display: 'flex', justifyContent: 'center', alignItems: 'center',
-    boxShadow: '0 0 10px rgba(30, 144, 255, 0.5)', transition: 'all 0.2s'
-  },
-
-  infoDisplay: { display: 'flex', flexDirection: 'column', gap: '5px' },
-  scoreText: { fontSize: '28px', fontWeight: 'bold', color: '#1e90ff', textShadow: '0 0 5px rgba(30, 144, 255, 0.7)' },
-  bombText: { fontSize: '28px', fontWeight: 'bold', color: '#f1f2f6', textShadow: '0 0 5px rgba(241, 242, 246, 0.7)' },
-  
-  comboContainer: { display: 'flex', alignItems: 'baseline', gap: '8px' },
-  comboText: { fontSize: '24px', fontWeight: 'bold', color: '#ffa502', textShadow: '0 0 8px rgba(255, 165, 2, 0.8)' },
-  multiplierText: { fontSize: '22px', fontWeight: 'bold', color: '#ff4757', textShadow: '0 0 8px rgba(255, 71, 87, 0.8)' },
-
-  boardPanel: {
-    padding: '15px', backgroundColor: 'rgba(0, 0, 0, 0.5)', 
-    borderRadius: '16px', border: '3px solid #1e90ff', 
-    boxShadow: '0 0 15px rgba(30, 144, 255, 0.5), inset 0 0 10px rgba(30, 144, 255, 0.3)', 
-    transition: 'opacity 0.3s ease-in-out',
-  },
-  boardInner: { position: 'relative', width: '442px', height: '442px' },
-  block: { display: 'flex', justifyContent: 'center', alignItems: 'center', width: '50px', height: '50px', borderRadius: '10px' },
-  
-  bombBtnContainer: { marginTop: '25px', marginBottom: '30px' },
-  bombBtn: { padding: '15px 40px', fontSize: '20px', fontWeight: 'bold', color: 'white', border: 'none', borderRadius: '12px' },
-  bombBtnShadowBlue: '0 0 10px rgba(30, 144, 255, 0.7), 0 0 20px rgba(30, 144, 255, 0.5)',
-  bombBtnShadowRed: '0 0 10px rgba(255, 71, 87, 0.7), 0 0 20px rgba(255, 71, 87, 0.5)',
-  
-  overlay: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0, 0, 0, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
-  startPanel: { backgroundColor: 'rgba(10, 14, 23, 0.95)', border: '3px solid #1e90ff', padding: '50px', borderRadius: '20px', textAlign: 'center', boxShadow: '0 0 20px rgba(30, 144, 255, 0.5)' },
-  pausePanel: { backgroundColor: 'rgba(10, 14, 23, 0.95)', border: '3px solid #ffa502', padding: '50px', borderRadius: '20px', textAlign: 'center', boxShadow: '0 0 20px rgba(255, 165, 2, 0.5)' },
-  resumeBtn: { padding: '15px 30px', fontSize: '24px', fontWeight: 'bold', backgroundColor: '#ffa502', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', boxShadow: '0 0 15px rgba(255, 165, 2, 0.7)' },
-
-  titleText: { fontSize: '48px', margin: '0 0 30px 0', color: '#1e90ff', textShadow: '0 0 10px rgba(30, 144, 255, 0.7)' },
-  startBtn: { padding: '15px 30px', fontSize: '24px', fontWeight: 'bold', backgroundColor: '#1e90ff', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', boxShadow: '0 0 15px rgba(30, 144, 255, 0.7)' },
-  gameOverPanel: { backgroundColor: 'rgba(10, 14, 23, 0.95)', border: '3px solid #ff4757', padding: '40px', borderRadius: '20px', textAlign: 'center', boxShadow: '0 0 20px rgba(255, 71, 87, 0.5)' },
-  timeUpText: { fontSize: '64px', margin: '0 0 15px 0', color: '#ff4757', textShadow: '0 0 10px rgba(255, 71, 87, 0.7), 0 0 20px rgba(255, 71, 87, 0.5)' },
-  finalScoreText: { fontSize: '32px', margin: '0 0 30px 0', color: '#f1f2f6' },
-  goHomeBtn: { padding: '12px 24px', fontSize: '18px', fontWeight: 'bold', backgroundColor: '#1e90ff', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' },
-};

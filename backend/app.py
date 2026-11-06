@@ -1,11 +1,55 @@
 import sqlite3
 import os
-from flask import Flask, request, jsonify
+from functools import wraps
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 CORS(app)
+
+# ==========================================
+# 認証まわりの設定
+# ==========================================
+# トークンの署名に使う秘密鍵。本番では必ず環境変数 SECRET_KEY に長いランダム文字列を設定する
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-me')
+TOKEN_MAX_AGE = 60 * 60 * 24 * 7  # トークンの有効期限（7日）
+token_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='auth-token')
+
+
+def create_token(user_id):
+    """ユーザーIDを署名付きのトークンにする（改ざんすると検証に失敗する）"""
+    return token_serializer.dumps(user_id)
+
+
+def login_required(f):
+    """リクエストヘッダーの「Authorization: Bearer <トークン>」を検証し、
+    正しければ g.user_id にログイン中のユーザーIDを入れてから本体を実行する"""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({"status": "error", "message": "ログインが必要です"}), 401
+
+        token = auth_header[len('Bearer '):]
+        try:
+            user_id = token_serializer.loads(token, max_age=TOKEN_MAX_AGE)
+        except SignatureExpired:
+            return jsonify({"status": "error", "message": "ログインの有効期限が切れました。もう一度ログインしてください"}), 401
+        except BadSignature:
+            return jsonify({"status": "error", "message": "トークンが不正です"}), 401
+
+        # 削除されたユーザーのトークンは使えないようにする
+        conn = get_db_connection()
+        user = conn.execute('SELECT id FROM users WHERE id = ?', (user_id,)).fetchone()
+        conn.close()
+        if not user:
+            return jsonify({"status": "error", "message": "ユーザーが見つかりません"}), 401
+
+        g.user_id = user_id
+        return f(*args, **kwargs)
+    return wrapper
 
 # ゲームバランス用の設定値
 DAILY_TARGET_MINUTES = 100  # デイリーミッションの目標時間（分）
@@ -27,12 +71,16 @@ def get_db_connection():
 # 新規登録
 @app.route('/api/auth/register', methods=['POST'])
 def register_user():
-    data = request.get_json()
-    user_id = data.get('user_id')
+    data = request.get_json(silent=True) or {}
+    user_id = (data.get('user_id') or '').strip()
     password = data.get('password')
 
     if not user_id or not password:
         return jsonify({"status": "error", "message": "user_idとpasswordは必須です"}), 400
+    if len(user_id) > 20:
+        return jsonify({"status": "error", "message": "ユーザーIDは20文字以内にしてください"}), 400
+    if len(password) < 4:
+        return jsonify({"status": "error", "message": "パスワードは4文字以上にしてください"}), 400
 
     hashed_password = generate_password_hash(password)
     conn = get_db_connection()
@@ -41,7 +89,12 @@ def register_user():
     try:
         c.execute('INSERT INTO users (id, password, study_minutes, bomb_count) VALUES (?, ?, 0, 0)', (user_id, hashed_password))
         conn.commit()
-        return jsonify({"status": "success", "message": "登録が完了しました！"}), 201
+        return jsonify({
+            "status": "success",
+            "message": "登録が完了しました！",
+            "user_id": user_id,
+            "token": create_token(user_id)
+        }), 201
     except sqlite3.IntegrityError:
         return jsonify({"status": "error", "message": "そのユーザーIDは既に使われています"}), 409
     finally:
@@ -50,8 +103,8 @@ def register_user():
 # ログイン
 @app.route('/api/auth/login', methods=['POST'])
 def login_user():
-    data = request.get_json()
-    user_id = data.get('user_id')
+    data = request.get_json(silent=True) or {}
+    user_id = (data.get('user_id') or '').strip()
     password = data.get('password')
 
     conn = get_db_connection()
@@ -61,9 +114,20 @@ def login_user():
     conn.close()
 
     if user and check_password_hash(user['password'], password):
-        return jsonify({"status": "success", "message": "ログイン成功", "user_id": user['id']})
+        return jsonify({
+            "status": "success",
+            "message": "ログイン成功",
+            "user_id": user['id'],
+            "token": create_token(user['id'])
+        })
     else:
         return jsonify({"status": "error", "message": "IDまたはパスワードが間違っています"}), 401
+
+# ログイン中のユーザー確認（保存しておいたトークンがまだ使えるか調べる）
+@app.route('/api/auth/me', methods=['GET'])
+@login_required
+def get_me():
+    return jsonify({"status": "success", "user_id": g.user_id})
 
 # ==========================================
 # 2. ユーザー＆アイテム機能 (User API)
@@ -71,9 +135,10 @@ def login_user():
 
 # ポモドーロ完了通知（ボムと勉強時間を追加＋教材ごとの記録）
 @app.route('/api/pomodoro/finish', methods=['POST'])
+@login_required
 def finish_pomodoro():
-    data = request.get_json()
-    user_id = data.get('user_id')
+    data = request.get_json(silent=True) or {}
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
     study_minutes = data.get('study_minutes', 25)
     subject_name = (data.get('subject_name') or 'その他').strip()[:50] or 'その他'
 
@@ -137,8 +202,9 @@ def finish_pomodoro():
 
 # 今日の学習記録（タイマー画面用）：今日の集中時間・セット数・最近使った教科・ボム数
 @app.route('/api/pomodoro/today', methods=['GET'])
+@login_required
 def get_today_summary():
-    user_id = request.args.get('user_id')
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
     if not user_id:
         return jsonify({"status": "error", "message": "user_idは必須です"}), 400
 
@@ -185,8 +251,9 @@ def get_today_summary():
 
 # アイテム（ボム）所持数の確認
 @app.route('/api/user/inventory', methods=['GET'])
+@login_required
 def get_inventory():
-    user_id = request.args.get('user_id')
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
     
     if not user_id:
         return jsonify({"status": "error", "message": "user_idは必須です"}), 400
@@ -212,8 +279,10 @@ def get_inventory():
 
 # プロフィール情報（累計、ボム、ハイスコア、教材別データ）の取得
 @app.route('/api/user/profile', methods=['GET'])
+@login_required
 def get_profile():
-    user_id = request.args.get('user_id')
+    # ?user_id=xxx があればその人のプロフィール（ランキングから見る用）、なければ自分
+    user_id = request.args.get('user_id') or g.user_id
 
     if not user_id:
         return jsonify({"status": "error", "message": "user_idは必須です"}), 400
@@ -270,9 +339,10 @@ def get_profile():
 
 # ゲーム終了時のスコア送信
 @app.route('/api/game/score', methods=['POST'])
+@login_required
 def submit_score():
-    data = request.get_json()
-    user_id = data.get('user_id')
+    data = request.get_json(silent=True) or {}
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
     score = data.get('score', 0)
 
     if not user_id:
@@ -334,9 +404,10 @@ def get_ranking():
 
 # フレンド申請を送る
 @app.route('/api/friends/request', methods=['POST'])
+@login_required
 def request_friend():
-    data = request.get_json()
-    user_id = data.get('user_id')       
+    data = request.get_json(silent=True) or {}
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
     friend_id = data.get('friend_id')   
 
     if not user_id or not friend_id:
@@ -363,9 +434,10 @@ def request_friend():
 
 # フレンド申請を承認する
 @app.route('/api/friends/accept', methods=['POST'])
+@login_required
 def accept_friend():
-    data = request.get_json()
-    user_id = data.get('user_id')       
+    data = request.get_json(silent=True) or {}
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
     friend_id = data.get('friend_id')   
 
     conn = get_db_connection()
@@ -392,8 +464,9 @@ def accept_friend():
 
 # フレンド一覧と承認待ち一覧の取得
 @app.route('/api/friends/list', methods=['GET'])
+@login_required
 def get_friends():
-    user_id = request.args.get('user_id')
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
     
     conn = get_db_connection()
     c = conn.cursor()
@@ -425,11 +498,37 @@ def get_friends():
         "pending_requests": pending_requests
     })
 
+# フレンドを解除する（お互いの登録を削除）
+@app.route('/api/friends/remove', methods=['POST'])
+@login_required
+def remove_friend():
+    data = request.get_json(silent=True) or {}
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
+    friend_id = data.get('friend_id')
+
+    if not friend_id:
+        return jsonify({"status": "error", "message": "friend_idは必須です"}), 400
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        DELETE FROM friends
+        WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
+    ''', (user_id, friend_id, friend_id, user_id))
+    deleted = c.rowcount
+    conn.commit()
+    conn.close()
+
+    if deleted == 0:
+        return jsonify({"status": "error", "message": "フレンドが見つかりません"}), 404
+    return jsonify({"status": "success", "message": f"{friend_id}とのフレンドを解除しました"})
+
 # ボム消費API (POST) - 有効期限対応版
 @app.route('/api/game/use_bomb', methods=['POST'])
+@login_required
 def use_bomb():
-    data = request.get_json()
-    user_id = data.get('user_id')
+    data = request.get_json(silent=True) or {}
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
 
     if not user_id:
         return jsonify({"status": "error", "message": "user_idは必須です"}), 400
@@ -476,8 +575,9 @@ def use_bomb():
 
 # ⑫ デイリーミッション進捗確認API (GET)
 @app.route('/api/missions/daily', methods=['GET'])
+@login_required
 def get_daily_mission():
-    user_id = request.args.get('user_id')
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
     if not user_id:
         return jsonify({"status": "error", "message": "user_idは必須です"}), 400
 
@@ -514,9 +614,10 @@ def get_daily_mission():
 
 # ⑬ デイリーミッション報酬受け取りAPI (POST)
 @app.route('/api/missions/claim', methods=['POST'])
+@login_required
 def claim_daily_reward():
-    data = request.get_json()
-    user_id = data.get('user_id')
+    data = request.get_json(silent=True) or {}
+    user_id = g.user_id  # トークンから特定したログイン中のユーザー
 
     if not user_id:
         return jsonify({"status": "error", "message": "user_idは必須です"}), 400

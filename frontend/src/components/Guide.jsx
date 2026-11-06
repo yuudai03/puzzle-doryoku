@@ -1,127 +1,82 @@
 import React from 'react';
 
+const STEPS = [
+  {
+    title: 'タイマーで集中する',
+    body: (
+      <>
+        ホームの「集中をはじめる」からタイマーを起動します。25分集中・5分休憩が基本で、
+        4セットごとに長い休憩が入ります。<strong>25分以上集中するとボムが1個</strong>もらえます。
+      </>
+    ),
+  },
+  {
+    title: 'デイリーミッションをクリアする',
+    body: (
+      <>
+        1日の集中が合計100分になったら「デイリーミッション」で報酬を受け取れます。
+        報酬はボム1個で、1日1回までです。ボムは<strong>もらってから3日で消える</strong>ので早めに使いましょう。
+      </>
+    ),
+  },
+  {
+    title: 'パズルでハイスコアを狙う',
+    body: (
+      <>
+        同じ色が3つ以上つながったブロックをタップで消せます。制限時間は60秒。
+        時間がたつとブロックが岩に変わり、岩はボムでしか壊せません。
+        ボムはタップした場所のまわり3×3をまとめて消し、スコアは2倍になります。
+        続けて消すとコンボになり、<strong>スコアは最大5倍</strong>までアップします。
+      </>
+    ),
+  },
+];
+
 export default function Guide({ onBack }) {
-  const accentColor = '#38bdf8';
-
-  const stepCardStyle = {
-    background: 'rgba(30, 41, 59, 0.8)',
-    border: `1px solid ${accentColor}`,
-    borderRadius: '8px',
-    padding: '25px',
-    marginBottom: '20px',
-    width: '100%',
-    maxWidth: '600px',
-    textAlign: 'left',
-    boxShadow: `0 0 15px rgba(56, 189, 248, 0.1)`,
-    position: 'relative'
-  };
-
-  const stepNumberStyle = {
-    position: 'absolute',
-    top: '-15px',
-    left: '-15px',
-    background: accentColor,
-    color: '#0f172a',
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: '50%',
-    fontSize: '1.2rem',
-    fontWeight: 'bold',
-    fontFamily: 'monospace',
-    boxShadow: `0 0 10px ${accentColor}`
-  };
-
-  const highlightStyle = {
-    color: accentColor,
-    fontWeight: 'bold'
-  };
-
   return (
-    <div className="container" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      padding: '40px 20px',
-      minHeight: '100vh',
-      backgroundColor: '#0f172a',
-      color: 'white',
-      fontFamily: 'monospace',
-      position: 'relative',
-      overflowY: 'auto'
-    }}>
-      
-      {/* 戻るボタン */}
-      <button 
-        onClick={onBack}
-        style={{
-          position: 'absolute',
-          top: '20px',
-          left: '20px',
-          background: 'transparent',
-          color: accentColor,
-          border: `1px solid ${accentColor}`,
-          padding: '8px 16px',
-          cursor: 'pointer',
-          fontFamily: 'monospace'
-        }}
-      >
-        [ BACK ]
-      </button>
-
-      <h2 style={{ 
-        color: accentColor, 
-        fontSize: '2.5rem', 
-        marginBottom: '10px', 
-        letterSpacing: '0.2em',
-        marginTop: '40px'
-      }}>
-        SYSTEM GUIDE
-      </h2>
-      <p style={{ color: '#94a3b8', marginBottom: '40px', letterSpacing: '0.1em' }}>
-        DRYOKU & PUZZLE プレイループ解説
-      </p>
-
-      {/* STEP 1 */}
-      <div style={stepCardStyle}>
-        <div style={stepNumberStyle}>01</div>
-        <h3 style={{ fontSize: '1.5rem', marginBottom: '10px', color: 'white' }}>
-          FOCUS & STUDY <span style={{ fontSize: '1rem', color: '#94a3b8' }}>// 集中して勉強する</span>
-        </h3>
-        <p style={{ lineHeight: '1.6', color: '#e2e8f0' }}>
-          まずは「START MISSION」からタイマーを起動し、今日の目標時間に向かって集中しましょう。
-          あなたの<span style={highlightStyle}>現実での努力（DRYOKU）</span>が、ゲームを有利に進めるための最強の武器になります。
-        </p>
+    <div className="page page-narrow">
+      <div className="page-header">
+        <button className="btn btn-ghost btn-back" onClick={onBack}>← ホーム</button>
       </div>
 
-      {/* STEP 2 */}
-      <div style={stepCardStyle}>
-        <div style={stepNumberStyle}>02</div>
-        <h3 style={{ fontSize: '1.5rem', marginBottom: '10px', color: 'white' }}>
-          GET REWARD <span style={{ fontSize: '1rem', color: '#94a3b8' }}>// 報酬を獲得する</span>
-        </h3>
-        <p style={{ lineHeight: '1.6', color: '#e2e8f0' }}>
-          目標時間をクリアしたら「MISSIONS」画面へアクセス！
-          デイリーミッション達成の報酬として、強力なアイテム<span style={highlightStyle}>「ボム（BOMB）」</span>を1つ獲得できます。
-          ※報酬の受け取りは1日1回限定です。
-        </p>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 className="page-title">遊び方</h1>
+        <p className="page-lead">勉強の努力が、そのままパズルの武器になります。</p>
       </div>
 
-      {/* STEP 3 */}
-      <div style={stepCardStyle}>
-        <div style={stepNumberStyle}>03</div>
-        <h3 style={{ fontSize: '1.5rem', marginBottom: '10px', color: 'white' }}>
-          PLAY PUZZLE <span style={{ fontSize: '1rem', color: '#94a3b8' }}>// ハイスコアを狙う</span>
-        </h3>
-        <p style={{ lineHeight: '1.6', color: '#e2e8f0' }}>
-          獲得したボムを使ってパズルに挑戦！<br />
-          ボムを起動すると<span style={highlightStyle}>タップした周囲3x3のブロックを強制消去</span>します。<br /><br />
-          ピンチを切り抜けるだけでなく、うまく連鎖（コンボ）を繋げば<span style={highlightStyle}>スコア最大5倍</span>のボーナスが発生！努力の結晶を爆発させて、ランキング上位を目指しましょう。
-        </p>
-      </div>
+      {STEPS.map((step, i) => (
+        <section key={step.title} className="card guide-step">
+          <span className="guide-num num">{i + 1}</span>
+          <div>
+            <h2 className="section-title" style={{ marginBottom: '6px' }}>{step.title}</h2>
+            <p className="text-2" style={{ margin: 0 }}>{step.body}</p>
+          </div>
+        </section>
+      ))}
 
+      <style>{`
+        .guide-step {
+          display: flex;
+          gap: 16px;
+          align-items: flex-start;
+        }
+        .guide-step strong {
+          color: var(--text);
+          font-weight: 700;
+        }
+        .guide-num {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          background: var(--accent-soft);
+          color: var(--accent-text);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 700;
+          flex-shrink: 0;
+        }
+      `}</style>
     </div>
   );
 }
